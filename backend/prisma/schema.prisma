@@ -1,0 +1,375 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// =========================================
+// ENUMS
+// =========================================
+
+enum TenantType {
+  personal
+  umkm
+}
+
+enum SubscriptionStatus {
+  active
+  suspended
+  trial
+  inactive
+}
+
+enum SubscriptionPlan {
+  free
+  basic
+  pro
+}
+
+enum UserRole {
+  owner
+  admin
+  member
+  platform_admin
+}
+
+enum UserStatus {
+  active
+  inactive
+}
+
+enum AccountType {
+  cash
+  bank
+  ewallet
+  hutang
+  piutang
+}
+
+enum AccountStatus {
+  active
+  inactive
+}
+
+enum CategoryType {
+  income
+  expense
+}
+
+enum CategoryStatus {
+  active
+  inactive
+}
+
+enum TransactionType {
+  income
+  expense
+  adjustment
+}
+
+enum TransactionSource {
+  web
+  whatsapp
+  adjustment
+}
+
+enum TransactionStatus {
+  active
+  void
+}
+
+enum TransferDirection {
+  out
+  in
+}
+
+enum PendingStatus {
+  pending
+  confirmed
+  cancelled
+  expired
+}
+
+enum LinkRequestStatus {
+  pending
+  confirmed
+  cancelled
+  expired
+}
+
+// =========================================
+// MODELS
+// =========================================
+
+model AccountIdentity {
+  id              String       @id @default(cuid())
+  name            String
+  whatsappNumber  String       @unique
+  whatsappJid     String?      @unique
+  activeTenantId  String?
+  status          UserStatus   @default(active)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  activeTenant    Tenant?      @relation("ActiveTenant", fields: [activeTenantId], references: [id])
+  memberships     TenantMember[]
+  legacyUsers     User[]
+
+  @@index([activeTenantId])
+}
+
+model TenantMember {
+  id          String          @id @default(cuid())
+  accountId   String
+  tenantId    String
+  role        UserRole        @default(member)
+  status      UserStatus      @default(active)
+  deletedAt   DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  account     AccountIdentity @relation(fields: [accountId], references: [id])
+  tenant      Tenant          @relation(fields: [tenantId], references: [id])
+
+  @@unique([accountId, tenantId])
+  @@index([tenantId])
+  @@index([accountId])
+}
+
+model Tenant {
+  id                 String             @id @default(cuid())
+  name               String
+  type               TenantType         @default(personal)
+  subscriptionPlan   SubscriptionPlan   @default(free)
+  subscriptionStatus SubscriptionStatus @default(trial)
+  trialEndsAt        DateTime?
+  status             String             @default("active") // active | inactive
+  deletedAt          DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  users              User[]
+  accounts           Account[]
+  categories         Category[]
+  transactions       Transaction[]
+  pendingTxns        WhatsappPendingTransaction[]
+  auditLogs          AuditLog[]
+  whatsappLinkTokens WhatsappLinkToken[]
+  whatsappLinkRequests WhatsappLinkRequest[]
+  members            TenantMember[]
+  activeIdentities   AccountIdentity[] @relation("ActiveTenant")
+}
+
+model User {
+  id              String     @id @default(cuid())
+  tenantId        String?
+  identityId      String?
+  name            String
+  whatsappNumber  String
+  deletedWhatsappNumber String?
+  whatsappJid     String?
+  role            UserRole   @default(owner)
+  status          UserStatus @default(active)
+  deletedAt       DateTime?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  tenant          Tenant?    @relation(fields: [tenantId], references: [id])
+  identity        AccountIdentity? @relation(fields: [identityId], references: [id])
+  otps            Otp[]
+  transactions    Transaction[]
+  pendingTxns     WhatsappPendingTransaction[]
+  auditLogs       AuditLog[]
+  whatsappLinkTokens WhatsappLinkToken[]
+  whatsappLinkRequests WhatsappLinkRequest[]
+
+  @@index([tenantId])
+  @@index([identityId])
+  @@index([whatsappNumber])
+  @@index([whatsappJid])
+}
+
+model Account {
+  id              String        @id @default(cuid())
+  tenantId        String
+  name            String
+  type            AccountType
+  openingBalance  Decimal       @default(0) @db.Decimal(18, 2)
+  currentBalance  Decimal       @default(0) @db.Decimal(18, 2)
+  isDefault       Boolean       @default(false)
+  status          AccountStatus @default(active)
+  contactName     String?
+  contactPhone    String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  transactions    Transaction[]
+  adjustments     BalanceAdjustment[]
+
+  @@index([tenantId])
+}
+
+model Category {
+  id          String         @id @default(cuid())
+  tenantId    String
+  name        String
+  type        CategoryType
+  isDefault   Boolean        @default(false)
+  status      CategoryStatus @default(active)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  tenant      Tenant         @relation(fields: [tenantId], references: [id])
+  transactions Transaction[]
+
+  @@index([tenantId])
+}
+
+model Transaction {
+  id               String            @id @default(cuid())
+  tenantId         String
+  userId           String
+  accountId        String
+  type             TransactionType
+  amount           Decimal           @db.Decimal(18, 2)
+  categoryId       String?
+  transactionDate  DateTime
+  description      String?
+  source           TransactionSource @default(web)
+  status           TransactionStatus @default(active)
+  transferGroupId  String?
+  transferDirection TransferDirection?
+  attachmentUrl    String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  tenant           Tenant            @relation(fields: [tenantId], references: [id])
+  user             User              @relation(fields: [userId], references: [id])
+  account          Account           @relation(fields: [accountId], references: [id])
+  category         Category?         @relation(fields: [categoryId], references: [id])
+  adjustment       BalanceAdjustment?
+
+  @@index([tenantId, transactionDate])
+  @@index([accountId])
+  @@index([categoryId])
+  @@index([transferGroupId])
+}
+
+model BalanceAdjustment {
+  id              String   @id @default(cuid())
+  transactionId   String   @unique
+  accountId       String
+  previousBalance Decimal  @db.Decimal(18, 2)
+  newBalance      Decimal  @db.Decimal(18, 2)
+  difference      Decimal  @db.Decimal(18, 2)
+  reason          String
+  createdAt       DateTime @default(now())
+
+  transaction     Transaction @relation(fields: [transactionId], references: [id])
+  account         Account     @relation(fields: [accountId], references: [id])
+}
+
+model WhatsappPendingTransaction {
+  id              String        @id @default(cuid())
+  tenantId        String
+  userId          String
+  whatsappNumber  String
+  rawMessage      String
+  parsedPayload   Json
+  status          PendingStatus @default(pending)
+  expiresAt       DateTime
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  user            User          @relation(fields: [userId], references: [id])
+
+  @@index([userId, status])
+}
+
+model Otp {
+  id              String    @id @default(cuid())
+  userId          String?
+  whatsappNumber  String
+  otpHash         String
+  expiresAt       DateTime
+  attempts        Int       @default(0)
+  usedAt          DateTime?
+  purpose         String    @default("login") // login | register
+  createdAt       DateTime  @default(now())
+
+  user            User?     @relation(fields: [userId], references: [id])
+
+  @@index([whatsappNumber])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String?
+  userId      String?
+  action      String
+  entityType  String
+  entityId    String?
+  oldValue    Json?
+  newValue    Json?
+  createdAt   DateTime @default(now())
+
+  tenant      Tenant?  @relation(fields: [tenantId], references: [id])
+  user        User?    @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+}
+
+model WhatsappLog {
+  id              String   @id @default(cuid())
+  tenantId        String?
+  whatsappNumber  String
+  direction       String   // inbound | outbound
+  message         String
+  intent          String?
+  meta            Json?
+  createdAt       DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([whatsappNumber])
+}
+
+model WhatsappLinkToken {
+  id          String    @id @default(cuid())
+  tenantId    String
+  userId      String
+  token       String    @unique
+  expiresAt   DateTime
+  usedAt      DateTime?
+  createdAt   DateTime  @default(now())
+
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  user        User      @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId])
+}
+
+model WhatsappLinkRequest {
+  id             String            @id @default(cuid())
+  tenantId       String
+  userId         String
+  whatsappNumber String
+  status         LinkRequestStatus @default(pending)
+  expiresAt      DateTime
+  confirmedAt    DateTime?
+  confirmedJid   String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  user           User              @relation(fields: [userId], references: [id])
+
+  @@index([tenantId])
+  @@index([userId, status])
+  @@index([whatsappNumber, status])
+}
