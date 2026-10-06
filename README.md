@@ -12,6 +12,12 @@ A multi-tenant personal and small-business financial recording platform featurin
 
 ---
 
+<p align="center">
+  <img src="docs/assets/dashboard-preview.png" alt="CatatIN Web Dashboard Preview" width="100%" />
+</p>
+
+---
+
 ## Architecture Overview
 
 CatatIN decouples data ingestion across multiple user touchpoints while enforcing strict tenant isolation and transactional integrity at the database layer.
